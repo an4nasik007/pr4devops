@@ -1,0 +1,58 @@
+
+name: Docker Compose CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+
+    env:
+      POSTGRES_USER: user
+      POSTGRES_DB: mydatabase
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Build and start containers
+        run: docker compose up -d --build
+
+      - name: Check PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T db \
+              pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs db
+          exit 1
+
+      - name: Check Flask website
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5000/ > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs web
+          exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v
